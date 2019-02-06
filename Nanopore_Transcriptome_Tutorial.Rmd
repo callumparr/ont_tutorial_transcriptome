@@ -1,0 +1,314 @@
+
+```{r preambleImports, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+# This R code is based on R (and python) methods distributed with 
+#       https://github.com/nanoporetech/pipeline-transcriptome-de
+#
+# General review and evaluation of the starting sequences and the
+# experimental design has been copied from the DESeq2 tutorial in
+# this same series
+
+library(yaml)
+
+library(DRIMSeq)
+library(AnnotationDbi)
+library(GenomicFeatures)
+library(dplyr)
+library(edgeR)
+library(DEXSeq)
+library(devtools)
+library(ggplot2)
+library(tidyr)
+library(session)     # session persistence added as feature request
+library(xlsx)
+library(digest)
+library(kableExtra)
+
+# BiocInstaller::biocLite(pkgs=c("tidyR"))
+
+md5sum <- function(filename) digest(filename, algo="md5", file=TRUE)
+
+```
+
+
+This workflow will import the previously defined **`config.yaml`** configuration file to identify the biological samples defined within the study. 
+
+
+```{r setupParameters, echo=FALSE, results='hide'}
+config <- yaml.load_file("config.yaml")
+
+# 
+studyDesign <- data.frame()
+for (i in 1:length(config$Samples)) {
+  studyDesign <- rbind(studyDesign, 
+                       data.frame(samples=names(config$Samples[[i]][[1]]), 
+                                  filename=unlist(config$Samples[[i]][[1]]), 
+                                  group=names(config$Samples[[i]])))
+}
+
+studyDesign$replicate <- sapply(1:nrow(studyDesign), function(x)sum(studyDesign$group[1:x]==studyDesign$group[x]))
+studyDesign$md5 <- lapply(as.character(studyDesign$filename), md5sum)
+# let's use the provided filename as the key??
+studyDesign$group <- relevel(studyDesign$group, ref=config$referenceGroup)
+# quick tidy
+studyDesign <- studyDesign[,-which(colnames(studyDesign)=="samples")]
+
+knitr::kable(studyDesign, caption="Study design for samples evaluated within this report", booktabs=TRUE, table.envir='table*', linesep="")  %>%
+  kable_styling(latex_options=c("hold_position", "scale_down"))
+
+```
+
+
+```{r}
+## this code block is intended to replace the merge_counts step of the Snakefile
+
+## Python code in Snakefile splits the name on the 1st "."
+samples <- gsub("\\..+", "", basename(as.character(studyDesign$filename)))
+
+## this code block to replace the col_data export and import
+
+coldata <- data.frame(cbind(NULL, sample_id=samples, condition=as.character(studyDesign$group), type="single-read"), stringsAsFactors=TRUE)
+
+sig_level <- 0.05
+
+resultDir <- file.path("Analysis", "Results")
+dir.create(resultDir, showWarnings = FALSE, recursive=TRUE)
+```
+
+
+Within the previously called **`snakemake`** workflow, sequence reads have been mapped to the reference genome using **`minimap2`** and the **`salmon`** method has been used to assign gene counts to the annotated gene and gene isoforms defined within the genome annotation **`gff`** file provided.
+
+
+```{r importSalmonCounts, results='hide'}
+salmonCountFiles <- paste(file.path("Analysis","Salmon",samples,"quant.sf"))
+
+rawSalmonCounts <- data.frame(Reference=character(), stringsAsFactors = FALSE)
+harvestSalmonCounts <- function(file) {
+  obs <- read.table(file, header=TRUE, stringsAsFactors = FALSE)
+  rawSalmonCounts <<- full_join(rawSalmonCounts, obs[which(obs$NumReads>0), c("Name", "NumReads")], by=c("Reference"="Name"))
+  file
+}
+lapply(salmonCountFiles, harvestSalmonCounts)
+colnames(rawSalmonCounts) <- append("Reference", samples)
+
+rownames(rawSalmonCounts) <- gsub("\\..+", "", as.character(rawSalmonCounts$Reference))
+```
+
+
+Analysis of the cDNA sequence expression data requires further information about the broader genomic context. The defined **`gff`** file will be used to build an annotation object in **`R`**; the `salmon` count data will be further aligned against these isoform annotations.
+
+
+```{r loadAnnotations}
+# load the database annotation from provided GFF file
+
+cat("Loading annotation database.\n")
+txdb <- makeTxDbFromGFF(file.path("ReferenceData", basename(config$annotation)))  # read Annotation field from config.yaml
+txdf <- AnnotationDbi::select(txdb, keys(txdb,"GENEID"), "TXNAME", "GENEID")
+tab <- table(txdf$GENEID)
+txdf$ntx<- tab[match(txdf$GENEID, names(tab))]
+
+
+# FIXME: filter for transcripts which are in the annotation. Why they are not all there? 
+filteredSalmonCounts <- rawSalmonCounts[-which(!rownames(rawSalmonCounts) %in% txdf$TXNAME),]
+
+# Create counts data frame:
+salmonCounts<-data.frame(txdf[match(rownames(filteredSalmonCounts), txdf$TXNAME), c(1,2)], filteredSalmonCounts)
+salmonCounts[is.na(salmonCounts)] <- 0
+colnames(salmonCounts) <- append(c("gene_id", "feature_id"),colnames(filteredSalmonCounts))
+
+```
+
+
+```{r}
+plotData(dmDSdata(counts=salmonCounts, samples=coldata))
+```
+
+
+**`DRIMSeq`** is used for read filtering. The count data is filtered according to the parameters defined within the **`config.yaml`** file; this includes specifically `min_samps_gene_expr` - the *minimal number of samples where an allowed gene should be expressed*, `min_samps_feature_expr` - the *minimal number of samples where allowed isoforms should be expressed*, `min_gene_expr` - the `minimal level of mapped sequence reads at a locus to consider a gene expressed`, and `min_feature_expr` - the `minimal level of mapped sequence reads at a locus to consider and isoform present`.
+
+```{r}
+
+cat("Filtering counts using DRIMSeq.\n")
+dmDSdataObj  <- dmDSdata(counts=salmonCounts, samples=coldata)
+trs_cts_unfiltered <- counts(dmDSdataObj)
+
+dmDSdataObj <- dmFilter(dmDSdataObj, min_samps_gene_expr = config$min_samps_gene_expr, 
+              min_samps_feature_expr = config$min_samps_feature_expr,
+              min_gene_expr = config$min_gene_expr, 
+              min_feature_expr = config$min_feature_expr)
+
+
+
+# Sum transcript counts into gene counts:
+trs_cts <- counts(dmDSdataObj)
+names(trs_cts)[2]<-"transcript_id"  # changed from featureID
+
+gene_cts <- trs_cts_unfiltered %>% dplyr::select(c(1, 3:ncol(trs_cts)))  %>% group_by(gene_id) %>% summarise_all(funs(sum)) %>% data.frame()
+rownames(gene_cts) <- gene_cts$gene_id
+gene_cts$gene_id <- NULL
+
+# write out these feature level (isoform) and gene count data to Excel files
+
+xlsExpressedGeneCounts <- file.path(resultDir, "FilteredExpressedGeneCounts.xlsx")
+write.xlsx(gene_cts, file = xlsExpressedGeneCounts, sheetName = "FilteredExpressedGeneCounts", append = FALSE)
+
+xlsExpressedFeatureCounts <- file.path(resultDir, "FilteredExpressedFeatureCounts.xlsx")
+write.xlsx(trs_cts, file = xlsExpressedFeatureCounts, sheetName = "FilteredExpressedFeatureCounts", append = FALSE)
+
+```
+
+Statistical analysis is first performed used **`edgeR`**.
+
+
+```{r}
+
+# Building model matrix
+design <- model.matrix(~condition, data=DRIMSeq::samples(dmDSdataObj))
+
+# Differential gene expression using edgeR:
+cat("Running differential gene expression analysis using edgeR.\n")
+
+y <- DGEList(gene_cts)
+y <- calcNormFactors(y)
+y <- estimateDisp(y,design)
+fit <- glmQLFit(y,design)
+qlf <- glmQLFTest(fit)
+edger_res <- topTags(qlf, n=nrow(y), sort.by="PValue")[[1]]
+```
+
+
+This edgeR differential expression can be represented as a volcano oplot.
+
+```{r MAPlot, echo=FALSE, include=TRUE, fig.margin=FALSE, fig.fullwidth = FALSE, fig.cap="Volcano plot showing distribution of log fold changes and adjusted p values", cache=FALSE}
+
+MAPlotData <- qlf$table
+logUp <- which(MAPlotData$logFC >= config$lfcThreshold)
+logDown <- which(MAPlotData$logFC <= -config$lfcThreshold)
+withStat <- which(MAPlotData$PValue <= config$adjPValueThreshold)
+colours <- c(noDifference="gray", upRegulated="red", downRegulated="green")
+gene <- rep("noDifference", nrow(MAPlotData))
+gene[logUp[logUp %in% withStat]] <- "upRegulated"
+gene[logDown[logDown %in% withStat]] <- "downRegulated"
+
+plot <- ggplot(data.frame(MAPlotData), aes(y=logFC, x=logCPM)) + 
+    geom_point(size=1.2) + 
+    geom_hline(yintercept=-config$lfcThreshold, color="green") + 
+    geom_hline(yintercept=config$lfcThreshold, color="red") + 
+    aes(colour=gene) + 
+    scale_colour_manual(values=colours) +
+    ggtitle("mean-difference plot (MA plot) showing logFC against logCPM")
+
+print(plot)
+```
+
+
+
+
+```{r}
+
+plotQLDisp(fit)
+
+```
+
+
+```{r}
+
+xlsEdgeRDiffExpr <- file.path(resultDir, "EdgeRDiffExpression.xlsx")
+write.xlsx(as.data.frame(edger_res), file = xlsEdgeRDiffExpr, sheetName = "EdgeRDiffExpression", append = FALSE)
+
+```
+
+```{r}
+
+# Differential transcript usage using DEXSeq:
+
+sample.data<-DRIMSeq::samples(dmDSdataObj)
+count.data <- round(as.matrix(counts(dmDSdataObj)[,-c(1:2)]))
+dxd <- DEXSeqDataSet(countData=count.data, sampleData=sample.data, design=~sample + exon + condition:exon, featureID=trs_cts$transcript_id, groupID=trs_cts$gene_id)
+
+dxd <- estimateSizeFactors(dxd)
+dxd <- estimateDispersions(dxd)
+dxd <- testForDEU(dxd, reducedModel=~sample + exon)
+dxd <- estimateExonFoldChanges( dxd, fitExpToVar="condition")
+
+dxr <- DEXSeqResults(dxd, independentFiltering=FALSE)
+
+
+```
+
+
+
+
+```{r}
+
+plotMA(dxr, cex=0.8, alpha=0.05) 
+
+```
+
+
+```{r}
+
+plotDispEsts(dxd, cex=0.8)
+
+```
+
+
+
+```{r}
+
+xlsAlternativelySplicedGenes <- file.path(resultDir, "AlternativelySplicedGenes.xlsx")
+alternativelySplicedGenes <- data.frame(gene_id=names(perGeneQValue(dxr)) , perGeneQValue(dxr), row.names=NULL)[order(perGeneQValue(dxr)), ]
+write.xlsx(alternativelySplicedGenes, file = xlsAlternativelySplicedGenes, sheetName = "AlternativelySplicedGenes", append = FALSE)
+
+
+xlsDiffExpressedIsoforms <- file.path(resultDir, "DiffExpressedIsoforms.xlsx")
+diffExpressedIsoforms <- dxr[order(dxr$padj), c("featureID", "groupID", "padj")]
+write.xlsx(diffExpressedIsoforms, file = xlsDiffExpressedIsoforms, sheetName = "diffExpressedIsoforms", append = FALSE)
+
+```
+
+
+```{r}
+# stageR analysis of DEXSeq results:
+pConfirmation <- matrix(dxr$pvalue, ncol=1)
+dimnames(pConfirmation) <- list(dxr$featureID, "transcript")
+pScreen <- perGeneQValue(dxr)
+tx2gene <- as.data.frame(dxr[,c("featureID", "groupID")])
+
+stageRObj <- stageRTx(pScreen=pScreen, pConfirmation=pConfirmation, pScreenAdjusted=TRUE, tx2gene=tx2gene)
+# note: the choice of 0.05 here means you can *only* threshold at 5% OFDR later
+stageRObj <- stageWiseAdjustment(stageRObj, method="dtu", alpha=0.05)
+dex.padj <- getAdjustedPValues(stageRObj, order=FALSE, onlySignificantGenes=FALSE)
+colnames(dex.padj) <- c("gene_id", "transcript_id", "p_gene", "p_transcript")
+
+xlsStageRDiffTranscriptUsage <- file.path(resultDir, "StageRDiffTranscriptUsage.xlsx")
+write.xlsx(dex.padj, file = xlsStageRDiffTranscriptUsage, sheetName = "StageRDiffTranscriptUsage", append = FALSE)
+
+# Join counts and stageR results:
+df <- trs_cts %>% left_join(dex.padj, by = c("gene_id", "transcript_id"))
+df <- df[order(df$p_gene),]
+
+# quickie to pull out the sample ids (could be derived from the earlier annotations?)
+scols <- setdiff(names(df),c("gene_id", "transcript_id", "p_gene", "p_transcript"))
+# Normalise counts:
+df[, scols] <- t(t(df[, scols]) / rowSums(df[, scols]))
+# Melt data frame:
+tdf <- df %>% gather(key='sample', value='norm_count',-gene_id, -transcript_id, -p_gene, -p_transcript)
+# add some grouping metadata
+tdf$group <- coldata[match(tdf$sample, coldata$sample_id),]$condition
+
+# Filter for significant genes:
+
+genes <- as.character(tdf[which(tdf$p_gene < sig_level),]$gene_id)
+genes <- unique(genes)
+
+for(gene in genes){
+  gdf<-tdf[which(tdf$gene_id==gene),]
+  p_gene <- unique(gdf$p_gene)
+  p <- ggplot(gdf, aes(x=transcript_id, y=norm_count)) + geom_bar(stat="identity", aes(fill=sample), position="dodge")
+  p <- p + facet_wrap(~ group) + coord_flip()
+  p <- p + ggtitle(paste(gene," : p_value=",p_gene,sep=""))
+  print(p)
+}
+```
+

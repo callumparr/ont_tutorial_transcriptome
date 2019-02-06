@@ -1,0 +1,25 @@
+channels:
+  - bioconda
+  - conda-forge/label/gcc7
+  - sagrudd
+  - r
+dependencies:
+  - snakemake-minimal
+  - python =3.6
+  - r =3.5.1
+  - rstudio
+  - pandas
+  - salmon
+  - minimap2
+  - samtools
+  - graphviz
+  - imagemagick
+  - bioconductor-drimseq
+  - bioconductor-annotationdbi
+  - bioconductor-genomicfeatures
+  - bioconductor-dexseq
+  - r-devtools
+  - r-session
+  - r-xlsx
+  - openjdk
+  - r-kableextra
