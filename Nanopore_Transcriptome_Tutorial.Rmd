@@ -1,6 +1,34 @@
+---
+title: "cDNA transcriptome tutorial - from cDNA sequence to differential isoform analysis"
+date: "Report created: `r Sys.Date()`"
+output:
+  html_document:
+    keep_md: yes
+    number_sections: yes
+    self_contained: yes
+    theme: default
+    highlight: null
+    css: Static/ont_tutorial.css
+    toc: yes
+    toc_depth: 2
+    toc_float:
+      collapsed: yes
+      smooth_scroll: yes
+    df_print: paged
+link-citations: yes
+bibliography: Static/Bibliography.bib
+always_allow_html: yes
+---
+
+
+<div style="position:absolute;top:0px;right:0px;padding:15px;background-color:gray;width:45%;">
+```{r, echo=FALSE}
+knitr::include_graphics("https://nanoporetech.com/themes/custom/nanopore/images/ont-logo.svg?tutorial=transcriptome")
+```
+</div>
+
 
 ```{r preambleImports, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
-
 # This R code is based on R (and python) methods distributed with 
 #       https://github.com/nanoporetech/pipeline-transcriptome-de
 #
@@ -9,7 +37,6 @@
 # this same series
 
 library(yaml)
-
 library(DRIMSeq)
 library(AnnotationDbi)
 library(GenomicFeatures)
@@ -23,21 +50,51 @@ library(session)     # session persistence added as feature request
 library(xlsx)
 library(digest)
 library(kableExtra)
+library(stageR)
+library(ShortRead)
 
 # BiocInstaller::biocLite(pkgs=c("tidyR"))
 
 md5sum <- function(filename) digest(filename, algo="md5", file=TRUE)
 
+ncalc <- function(len.vector, n) {
+  # N50 - length such that scaffolds of this length or longer include half the bases of the assembly
+  len.sorted <- rev(sort(len.vector))
+  len.sorted[cumsum(len.sorted) >= sum(len.sorted)*n][1]
+}
+
+lcalc <- function(len.vector, n) {
+  len.sorted <- rev(sort(len.vector))
+  which(cumsum(len.sorted) >= sum(len.sorted)*n)[1]
+}
+
+config <- yaml.load_file("config.yaml")
+tutorialText   <- config$tutorialText
+
+slurpContent <- function(filename) {
+  include = as.logical(tutorialText)
+  if (include) {
+    paste(readLines(filename),collapse="\n")
+  }
+}
+
+sig_level <- config$adjPValueThreshold
+
+resultDir <- file.path("Analysis", "Results")
+dir.create(resultDir, showWarnings = FALSE, recursive=TRUE)
+
 ```
 
 
-This workflow will import the previously defined **`config.yaml`** configuration file to identify the biological samples defined within the study. 
+`r slurpContent("Static/TutorialPreamble.md")`
 
 
-```{r setupParameters, echo=FALSE, results='hide'}
-config <- yaml.load_file("config.yaml")
+# Study design
 
-# 
+The **`Nanopore_Transcriptome_Tutorial.Rmd`** script has been used to generate this report. The previously described **`config.yaml`** configuration file defines the biological samples used in this DGE and DTU analysis. The study design described by the configuration file is presented in the table below.
+
+
+```{r setupParameters, echo=FALSE}
 studyDesign <- data.frame()
 for (i in 1:length(config$Samples)) {
   studyDesign <- rbind(studyDesign, 
@@ -53,33 +110,118 @@ studyDesign$group <- relevel(studyDesign$group, ref=config$referenceGroup)
 # quick tidy
 studyDesign <- studyDesign[,-which(colnames(studyDesign)=="samples")]
 
-knitr::kable(studyDesign, caption="Study design for samples evaluated within this report", booktabs=TRUE, table.envir='table*', linesep="")  %>%
+knitr::kable(studyDesign, booktabs=TRUE, table.envir='table*', linesep="")  %>%
   kable_styling(latex_options=c("hold_position", "scale_down"))
 
 ```
 
+*Table showing the cDNA sequence files evaluated for DGE and DTU in this report. Treatment group and replicate number are shown for each of the sequence files. The md5 column presents the md5 checksum calculated for each of the starting cDNA sequence files*
 
-```{r}
-## this code block is intended to replace the merge_counts step of the Snakefile
+# Review of raw cDNA sequences 
 
-## Python code in Snakefile splits the name on the 1st "."
-samples <- gsub("\\..+", "", basename(as.character(studyDesign$filename)))
+It is worth considering some of the characteristics of each set of sequences included within the analysis workflow. The statistics shown in the table below have been produced using the R ShortRead package (@R-ShortRead). Loading the provided Fastq format sequence files into computer memory allows us to calculate sequence length distributions, a review of sequence qualities and some minimal statistics that enable the qualitative and quantitative review of these different datasets.
 
-## this code block to replace the col_data export and import
+```{r seqLibraryReview, echo=FALSE}
+processQCFastq <- function(rowname) {
+  row <- which(row.names(studyDesign)==rowname)
+  file <- as.character(studyDesign[row, "filename"])
+  fastq <- readFastq(file)
+  c(
+    reads = formatC(length(fastq), big.mark=","),
+    mbs = formatC(round(sum(width(fastq)) / 1000 / 1000, digits=1), big.mark=","),
+    min = min(width(fastq)),
+    max = max(width(fastq)),
+    mean = round(mean(width(fastq)), digits=1),
+    median = round(median(width(fastq)), digits=0),
+    qval = round(mean(alphabetScore(fastq) / width(fastq)), digits=1),
+    gc = round(mean(letterFrequency(sread(fastq), "GC")  / width(fastq)) * 100, digits=1),
+    n50 = ncalc(width(fastq), n=0.5),
+    l50 = lcalc(width(fastq), n=0.5),
+    n90 = ncalc(width(fastq), n=0.9),
+    l90 = lcalc(width(fastq), n=0.9)
+  )
+}
 
-coldata <- data.frame(cbind(NULL, sample_id=samples, condition=as.character(studyDesign$group), type="single-read"), stringsAsFactors=TRUE)
+data <- lapply(row.names(studyDesign), processQCFastq)
+qcData <- data.frame(data)
+colnames(qcData) <- row.names(studyDesign)
 
-sig_level <- 0.05
-
-resultDir <- file.path("Analysis", "Results")
-dir.create(resultDir, showWarnings = FALSE, recursive=TRUE)
+knitr::kable(qcData, booktabs=TRUE, table.envir='table*', linesep="")  %>%
+  kable_styling(latex_options=c("hold_position", font_size=9)) 
 ```
 
+*Table presenting summary statistics for the cDNA libraries imported*
 
-Within the previously called **`snakemake`** workflow, sequence reads have been mapped to the reference genome using **`minimap2`** and the **`salmon`** method has been used to assign gene counts to the annotated gene and gene isoforms defined within the genome annotation **`gff`** file provided.
+
+The summary statistics displayed include observational metrics such as the number of sequence reads, information on the longest, shortest and mean read lengths, GC content, N50 and N90 read lengths. Ideally sequences from each library will have similar characteristics. Large differences in e.g. the number of reads, overall read quality and GC content may indicate technical differences between the samples - such differences may confound the statistical analysis and hinder the identification of differentially expressed genes.
 
 
-```{r importSalmonCounts, results='hide'}
+# Review of cDNA read mapping.
+
+The workflow includes a **`samtools flagstat`** mapping statistic summary, written to files in the `Analysis/samtools` folder. These mapping statistics are useful for evaluating the concordance of different sequence libraries and thus the overall quality of the study - ideally there should be robust similarities in the fraction of mapping sequence reads / multi-mapping reads etc.
+
+
+```{r flagstatStats, echo=FALSE, cache=FALSE}
+flagstatTargets <- file.path("Analysis", "samtools", 
+    paste(tools::file_path_sans_ext(basename(as.character(studyDesign$filename)), compression=TRUE),".flagstat",sep="")
+)
+loadFlagstat <- function(file) {
+  x <- read.table(file, header=FALSE, sep=" ", fill=NA)[c(1:5),c(1,3)]
+  x[,1]
+}
+
+flagstatRes <- data.frame(matrix(unlist(lapply(flagstatTargets, loadFlagstat)), ncol=length(flagstatTargets)), stringsAsFactors = FALSE)
+colnames(flagstatRes) <- rownames(studyDesign)
+rownames(flagstatRes) <- c("read mappings", "Secondary", "Supplementary", "Duplicates", "Mapped")
+
+# include the measured number of reads; this is real
+flagstatRes[nrow(flagstatRes)+1,] <- as.numeric(gsub(",","",t(qcData)[, "reads"]))
+rownames(flagstatRes)[6] <- "nreads"
+
+getVal <- function(word) {
+  sum(as.numeric(unlist(strsplit(word, "/"))))
+}
+
+zreads <- unlist(lapply(flagstatRes["read mappings", ], getVal)) -
+  unlist(lapply(flagstatRes["Secondary", ], getVal)) -
+  unlist(lapply(flagstatRes["Supplementary", ], getVal)) - 
+  unlist(lapply(flagstatRes["Duplicates", ], getVal)) 
+
+flagstatRes[nrow(flagstatRes)+1,] <- zreads
+rownames(flagstatRes)[7] <- "zreads"
+
+flagstatRes[nrow(flagstatRes)+1,] <- as.numeric(flagstatRes["zreads", ]) / as.numeric(flagstatRes["nreads", ]) * 100
+rownames(flagstatRes)[8] <- "%mapping"
+
+flagstatRes <- flagstatRes[c(6,1,2,3,4,8),]
+
+knitr::kable(flagstatRes, booktabs=TRUE, table.envir='table*', linesep="")  %>%
+  kable_styling(latex_options=c("hold_position", font_size=11))
+
+```
+
+*Table showing summary statistics from the minimap2 long read mapping of reads to the reference transcriptome*
+
+The read mapping statistics shown in the table above are derived from the **`bam`** files produced by **`minimap2`** when reads are mapped to the reference transcriptome (index). **`read mappings`** corresponds to the number of unique read mappings within the BAM file (one read may map to more than one location). **`Secondary`** corresponds to a secondary alignment for a read that can be mapped to multiple locations. A **`Supplementary`** alignment could correspond to an alignment that is chimeric or represents a structural variant or complex fusion event. A **`Duplicate`** read is unlikely but would represent multiple *identical* reads at the same locus that are likely the result of an amplification during the library preparation. **`%Mapping`** corresponds to the percentage fraction of sequence reads that are mapped to the reference genome - this is calculated as the number of primary mappings against the total number of sequence reads observed in the starting fastq files.
+
+
+
+
+```{r, echo=FALSE}
+## this code block is intended to replace the merge_counts step of the Snakefile
+## Python code in Snakefile splits the name on the 1st "."
+samples <- gsub("\\..+", "", basename(as.character(studyDesign$filename)))
+## this code block to replace the col_data export and import
+coldata <- data.frame(cbind(NULL, sample_id=samples, condition=as.character(studyDesign$group), type="single-read"), stringsAsFactors=TRUE)
+
+
+```
+
+# Salmon for assigning mapped cDNA sequence reads to transcripts
+
+cDNA sequence reads have been mapped to the reference transcriptome using **`minimap2`**. The **`Salmon`** tool (@Salmon2017) has been used to assign cDNA read counts to the annotated transcripts defined within the transcriptome **`fasta`** file provided. This was performed using the **`alignment`**-based mode of Salmon.
+
+```{r importSalmonCounts, results='hide', echo=FALSE}
 salmonCountFiles <- paste(file.path("Analysis","Salmon",samples,"quant.sf"))
 
 rawSalmonCounts <- data.frame(Reference=character(), stringsAsFactors = FALSE)
@@ -95,18 +237,41 @@ rownames(rawSalmonCounts) <- gsub("\\..+", "", as.character(rawSalmonCounts$Refe
 ```
 
 
-Analysis of the cDNA sequence expression data requires further information about the broader genomic context. The defined **`gff`** file will be used to build an annotation object in **`R`**; the `salmon` count data will be further aligned against these isoform annotations.
+
+```{r geneCounts, echo=FALSE}
+# adjust column names for the presented table and excel file
+vRawSalmonCounts <- rawSalmonCounts[order(rowSums(rawSalmonCounts[, seq(2, ncol(rawSalmonCounts))]), decreasing=TRUE),]
+newnames <- rownames(studyDesign)[match(colnames(vRawSalmonCounts)[which(colnames(vRawSalmonCounts) %in% samples)], samples)]
+colnames(vRawSalmonCounts)[which(colnames(vRawSalmonCounts) %in% samples)] <- newnames
+
+knitr::kable(vRawSalmonCounts[1:10,], booktabs=TRUE, table.envir='table*', linesep="") %>%
+  kable_styling(latex_options=c("hold_position", font_size=11))
+
+xlsExpressedTranscripts <- file.path(resultDir, "ExpressedTranscripts.xlsx")
+write.xlsx(vRawSalmonCounts, file = xlsExpressedTranscripts,
+      sheetName = "rawSalmonCounts", append = FALSE)
+```
+
+*Table showing the 10 annotated transcript features identified by Minimap2 mapping and Salmon transcript detection with the highest number of mapped reads*
+
+The complete transcript mapping data is provided as an Excel format spreadsheet file at
+
+~~~
+`r xlsExpressedTranscripts`
+~~~
 
 
-```{r loadAnnotations}
+The **`Salmon`** method, as shown in the table above, has assigned expressed cDNA sequence reads to individual transcripts or gene isoforms. The next step in the sequence analysis is to map gene isoforms back to their parental genes for gene level analysis. This utilises the genome annotation **`gff`** file described in the **`config.yaml`** file.
+
+
+
+
+```{r loadAnnotations, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
 # load the database annotation from provided GFF file
-
-cat("Loading annotation database.\n")
 txdb <- makeTxDbFromGFF(file.path("ReferenceData", basename(config$annotation)))  # read Annotation field from config.yaml
 txdf <- AnnotationDbi::select(txdb, keys(txdb,"GENEID"), "TXNAME", "GENEID")
 tab <- table(txdf$GENEID)
 txdf$ntx<- tab[match(txdf$GENEID, names(tab))]
-
 
 # FIXME: filter for transcripts which are in the annotation. Why they are not all there? 
 filteredSalmonCounts <- rawSalmonCounts[-which(!rownames(rawSalmonCounts) %in% txdf$TXNAME),]
@@ -116,19 +281,42 @@ salmonCounts<-data.frame(txdf[match(rownames(filteredSalmonCounts), txdf$TXNAME)
 salmonCounts[is.na(salmonCounts)] <- 0
 colnames(salmonCounts) <- append(c("gene_id", "feature_id"),colnames(filteredSalmonCounts))
 
+# adjust column names for the presented table and excel file
+vSalmonCounts <- salmonCounts[order(rowSums(salmonCounts[, seq(4, ncol(salmonCounts))]), decreasing=TRUE),]
+newnames <- rownames(studyDesign)[match(colnames(vSalmonCounts)[which(colnames(vSalmonCounts) %in% samples)], samples)]
+colnames(vSalmonCounts)[which(colnames(vSalmonCounts) %in% samples)] <- newnames
+
+xlsExpressedGenesTranscripts <- file.path(resultDir, "ExpressedGenesTranscripts.xlsx")
+write.xlsx(vSalmonCounts, file = xlsExpressedGenesTranscripts,
+      sheetName = "salmonCounts", append = FALSE)
+
 ```
 
+An Excel format spreadsheet containing the transcript mapping counts and parental gene assignments has been prepared and is available in the following folder. 
 
-```{r}
+~~~
+`r xlsExpressedGenesTranscripts`
+~~~
+
+This step is informative important for the statistical analyses but also reveals the number of transcripts that can be observed for each gene. While a majority of genes contain a single expressed isoform (**`r round(as.numeric((table(table(salmonCounts$gene_id)) / length(table(salmonCounts$gene_id)) * 100)[1]), digits=1)` %** of genes contain a single isoform). The largest number of transcripts associated with a single gene is **`r max(table(salmonCounts$gene_id))` ** transcripts.
+
+```{r geneTranscriptCount, echo=FALSE}
 plotData(dmDSdata(counts=salmonCounts, samples=coldata))
 ```
 
+* Frequency plot showing the number of transcripts assigned to genes across the sampled cDNA sequence collection *
 
-**`DRIMSeq`** is used for read filtering. The count data is filtered according to the parameters defined within the **`config.yaml`** file; this includes specifically `min_samps_gene_expr` - the *minimal number of samples where an allowed gene should be expressed*, `min_samps_feature_expr` - the *minimal number of samples where allowed isoforms should be expressed*, `min_gene_expr` - the `minimal level of mapped sequence reads at a locus to consider a gene expressed`, and `min_feature_expr` - the `minimal level of mapped sequence reads at a locus to consider and isoform present`.
+# Read filtering
 
-```{r}
 
-cat("Filtering counts using DRIMSeq.\n")
+**`DRIMSeq`** (@R-DRIMSeq) is used to filter the transcribed gene isoforms. The transcripts are filtered to select for the subset that are present in sufficient samples and are further filtered to remove both genes and transcripts with low levels of expression. The parameters used for filtering are defined in the **`config.yaml`** file. The parameters defined for this analysis include
+
+* `min_samps_gene_expr` = **`r config$min_samps_gene_expr`** - a transcript must be mapped to a *gene* in at least this *minimum number of samples* for the *gene* be included in the analysis
+* `min_samps_feature_expr` = **`r config$min_samps_feature_expr`** - a transcript must be mapped to an *isoform* in at least this this *minimum number of samples* for the *gene isoform* to be included in the analysis
+* `min_gene_expr` = **`r config$min_gene_expr`** - the *minimum number of total mapped sequence reads* for a gene to be considered *expressed*
+* `min_feature_expr` = **`r config$min_feature_expr`** - the *minimum number of total mapped sequence reads* for a *gene isoform* to be considered
+
+```{r, echo=FALSE}
 dmDSdataObj  <- dmDSdata(counts=salmonCounts, samples=coldata)
 trs_cts_unfiltered <- counts(dmDSdataObj)
 
@@ -157,27 +345,55 @@ write.xlsx(trs_cts, file = xlsExpressedFeatureCounts, sheetName = "FilteredExpre
 
 ```
 
-Statistical analysis is first performed used **`edgeR`**.
+~~~
+`r xlsExpressedGeneCounts`
+`r xlsExpressedFeatureCounts`
+~~~
+
+The filtered gene counts and gene isoform counts have been written to Excel format spreadsheet files in the paths indicated above.
 
 
-```{r}
+# Statistical analysis
 
-# Building model matrix
-design <- model.matrix(~condition, data=DRIMSeq::samples(dmDSdataObj))
+A statistical analysis is first performed using **`edgeR`** (@R-edgeR2010, @R-edgeR2012) to identify the subset of differentially expressed genes. The filtered list of gene counts is used as input. A normalisation factor is calculated for each sequence library (using the default `TMM` method - please see @R-edgeR2012 for further details). The defined experimental design is used to calculate estimates of dispersion across for each of the gene features. Genewise statistical tests are then calculated, again using the contrasts defined in the experimental design. The differentially expressed genes are corrected for false discovery (*fdr*) using the method of Benjamini & Hochberg (@BH1995) 
 
+
+```{r, echo=FALSE, results='hide', warning=FALSE, error=FALSE}
+# Building model matrix - ensuring that the config.yaml specified reference is key in specified factor ...
+Group <- factor(studyDesign$group, 
+                levels=append(config$referenceGroup,
+                              levels(studyDesign$group)[which(levels(studyDesign$group)!=config$referenceGroup)]))
+design <- model.matrix(~Group)
 # Differential gene expression using edgeR:
-cat("Running differential gene expression analysis using edgeR.\n")
 
 y <- DGEList(gene_cts)
 y <- calcNormFactors(y)
 y <- estimateDisp(y,design)
 fit <- glmQLFit(y,design)
+
 qlf <- glmQLFTest(fit)
 edger_res <- topTags(qlf, n=nrow(y), sort.by="PValue")[[1]]
+
+xlsEdgeRDiffExpr <- file.path(resultDir, "EdgeRDiffExpression.xlsx")
+write.xlsx(as.data.frame(edger_res), file = xlsEdgeRDiffExpr, sheetName = "EdgeRDiffExpression", append = FALSE)
 ```
 
+The results of the differential expression analysis have been written to an Excel format spreadsheet file in the location presented below.
 
-This edgeR differential expression can be represented as a volcano oplot.
+~~~
+`r xlsEdgeRDiffExpr`
+~~~
+
+```{r diffExprTable, echo=FALSE}
+knitr::kable(edger_res[1:15,], digits = c(2,2,2,45,45), booktabs=TRUE, table.envir='table*', linesep="")  %>%
+  kable_styling(latex_options=c("hold_position"), font_size=9)
+```
+
+*Table showing the top 15 genes, ranked by adjusted p-value, from the edgeR analysis. Information shown includes the log2 fold change between experimental conditions, the log-scaled counts per million measure of abundance and the false discovery corrected p-value (FDR). This table has not been filtered for genes that satisfy statistical or magnitudinal thresholds*
+
+
+The results from the **`edgeR`** analysis can be plotted as an **`MA Plot`**. This plot visualises differences in measurements between the two experimental conditions. M is the log2 ratio of gene expression calculated between the conditions. A is the log mean-average gene expression. The figure below presents the MA figure from this edgeR analysis. Genes that satisfy the *logFC* and FDR corrected *p-value* thresholds defined in the **`config.yaml`** configuration file are shaded. 
+
 
 ```{r MAPlot, echo=FALSE, include=TRUE, fig.margin=FALSE, fig.fullwidth = FALSE, fig.cap="Volcano plot showing distribution of log fold changes and adjusted p values", cache=FALSE}
 
@@ -201,22 +417,15 @@ plot <- ggplot(data.frame(MAPlotData), aes(y=logFC, x=logCPM)) +
 print(plot)
 ```
 
-
-
-
+<!--
+The plot of dispersion is a great looking plot but is omitted in this version of the tutorial
 ```{r}
-
 plotQLDisp(fit)
-
 ```
+-->
 
+# Differential transcript usage
 
-```{r}
-
-xlsEdgeRDiffExpr <- file.path(resultDir, "EdgeRDiffExpression.xlsx")
-write.xlsx(as.data.frame(edger_res), file = xlsEdgeRDiffExpr, sheetName = "EdgeRDiffExpression", append = FALSE)
-
-```
 
 ```{r}
 
@@ -311,4 +520,49 @@ for(gene in genes){
   print(p)
 }
 ```
+
+
+# Glossary of Terms
+
+* __knit__ is the command to render an Rmarkdown file. The knitr package is used to embed code, the results of R analyses and their figures within the typeset text from the document. 
+
+* __L50__  describes the number of sequences (or contigs) that are longer than, or equal to, the N50 length and therefore include half the bases of the assembly
+
+* __N50__  describes the length (read length, contig length etc) where half the bases of the sequence collection are contained within reads/contigs of this length or longer
+
+* __Rmarkdown__ is an extension to markdown. Functional R code can be embedded in a plain-text document and subsequently rendered to other formats including the PDF format of this report.
+
+* __QV__  the quality value, -log10(p) that any given base is incorrect. QV may be either at the individual base level, or may be averaged across whole sequences
+
+
+
+# Reproducible Research - Produce your own report
+
+This report has been created using **`Rmarkdown`**, publicly available **`R`** packages, and the \LaTeX document typesetting software for reproducibility. For clarity the **`R`** packages used, and their versions, is listed below.
+
+\fontsize{8}{12}
+
+```{r sessionInfo, eval=TRUE, echo=FALSE, comment=NA}
+options(width = 100)
+utils:::print.sessionInfo(sessionInfo()[-7], locale=FALSE)
+```
+
+\fontsize{10}{14}
+
+
+It is also worth recording the versions of the software that have been used for the analysis.
+
+\fontsize{8}{12}
+
+```{r, engine='bash', echo=FALSE, comment=NA, eval=FALSE}
+conda list "salmon|samtools|minimap2|snakemake|rstudio|openjdk"
+```
+
+`r slurpContent("Static/TutorialPostamble.md")`
+
+
+\pagebreak
+
+
+# References and citations
 

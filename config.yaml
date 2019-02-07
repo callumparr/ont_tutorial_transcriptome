@@ -1,7 +1,5 @@
 ---
 
-## Pipeline-specific parameters:
-
 transcriptome: "http://ftp.ensembl.org/pub/release-95/fasta/homo_sapiens/cdna/Homo_sapiens.GRCh38.cdna.all.fa.gz"
 
 annotation: "http://ftp.ensembl.org/pub/release-95/gtf/homo_sapiens/Homo_sapiens.GRCh38.95.gtf.gz"
@@ -46,4 +44,6 @@ adjPValueThreshold: 0.05    # adjusted p-value threshold for differential expres
 
 
 threads: 50
+tutorialText: TRUE
+
 
