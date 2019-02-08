@@ -82,6 +82,7 @@ sig_level <- config$adjPValueThreshold
 
 resultDir <- file.path("Analysis", "Results")
 dir.create(resultDir, showWarnings = FALSE, recursive=TRUE)
+persistenceData <- file.path(resultDir, "NanoporeTutorial.Rdata")
 
 ```
 
@@ -304,7 +305,7 @@ This step is informative important for the statistical analyses but also reveals
 plotData(dmDSdata(counts=salmonCounts, samples=coldata))
 ```
 
-* Frequency plot showing the number of transcripts assigned to genes across the sampled cDNA sequence collection *
+*Frequency plot showing the number of transcripts assigned to genes across the sampled cDNA sequence collection*
 
 # Read filtering
 
@@ -353,7 +354,7 @@ write.xlsx(trs_cts, file = xlsExpressedFeatureCounts, sheetName = "FilteredExpre
 The filtered gene counts and gene isoform counts have been written to Excel format spreadsheet files in the paths indicated above.
 
 
-# Statistical analysis
+# Differential gene expression analysis
 
 A statistical analysis is first performed using **`edgeR`** (@R-edgeR2010, @R-edgeR2012) to identify the subset of differentially expressed genes. The filtered list of gene counts is used as input. A normalisation factor is calculated for each sequence library (using the default `TMM` method - please see @R-edgeR2012 for further details). The defined experimental design is used to calculate estimates of dispersion across for each of the gene features. Genewise statistical tests are then calculated, again using the contrasts defined in the experimental design. The differentially expressed genes are corrected for false discovery (*fdr*) using the method of Benjamini & Hochberg (@BH1995) 
 
@@ -384,7 +385,7 @@ The results of the differential expression analysis have been written to an Exce
 `r xlsEdgeRDiffExpr`
 ~~~
 
-```{r diffExprTable, echo=FALSE}
+```{r diffExprGeneTable, echo=FALSE}
 knitr::kable(edger_res[1:15,], digits = c(2,2,2,45,45), booktabs=TRUE, table.envir='table*', linesep="")  %>%
   kable_styling(latex_options=c("hold_position"), font_size=9)
 ```
@@ -392,10 +393,10 @@ knitr::kable(edger_res[1:15,], digits = c(2,2,2,45,45), booktabs=TRUE, table.env
 *Table showing the top 15 genes, ranked by adjusted p-value, from the edgeR analysis. Information shown includes the log2 fold change between experimental conditions, the log-scaled counts per million measure of abundance and the false discovery corrected p-value (FDR). This table has not been filtered for genes that satisfy statistical or magnitudinal thresholds*
 
 
-The results from the **`edgeR`** analysis can be plotted as an **`MA Plot`**. This plot visualises differences in measurements between the two experimental conditions. M is the log2 ratio of gene expression calculated between the conditions. A is the log mean-average gene expression. The figure below presents the MA figure from this edgeR analysis. Genes that satisfy the *logFC* and FDR corrected *p-value* thresholds defined in the **`config.yaml`** configuration file are shaded. 
+The results from the **`edgeR`** analysis can be plotted as an **`MA Plot`**. This plot visualises differences in measurements between the two experimental conditions. M is the log2 ratio of gene expression calculated between the conditions. A is a log2 transformed mean expression value. The figure below presents the MA figure from this edgeR analysis. Genes that satisfy the *logFC* and FDR corrected *p-value* thresholds defined in the **`config.yaml`** configuration file are shaded. 
 
 
-```{r MAPlot, echo=FALSE, include=TRUE, fig.margin=FALSE, fig.fullwidth = FALSE, fig.cap="Volcano plot showing distribution of log fold changes and adjusted p values", cache=FALSE}
+```{r MAGenePlot, echo=FALSE}
 
 MAPlotData <- qlf$table
 logUp <- which(MAPlotData$logFC >= config$lfcThreshold)
@@ -412,22 +413,23 @@ plot <- ggplot(data.frame(MAPlotData), aes(y=logFC, x=logCPM)) +
     geom_hline(yintercept=config$lfcThreshold, color="red") + 
     aes(colour=gene) + 
     scale_colour_manual(values=colours) +
-    ggtitle("mean-difference plot (MA plot) showing logFC against logCPM")
+    ggtitle("MA plot showing logFC against logCPM for gene level data")
 
 print(plot)
 ```
 
 <!--
 The plot of dispersion is a great looking plot but is omitted in this version of the tutorial
-```{r}
 plotQLDisp(fit)
-```
 -->
 
-# Differential transcript usage
+# Differential transcript usage analysis
 
+Differential transcript usage analysis is performed using the *R* **`DEXSeq`** package (@R-DEXSeq). Similar to the **`edgeR`** package, **`DEXSeq`** estimates the variance between the biological replicates and applies generalised linear models for the statistical testing. The key difference is that the **`DEXSeq`** method is looking for differences at the exon count level.
 
-```{r}
+**`DEXSeq`** uses the filtered transcript count data prepared earlier in this analysis. 
+
+```{r DEXSeq, echo=FALSE, warning=FALSE, error=FALSE, results='hide', message=FALSE}
 
 # Differential transcript usage using DEXSeq:
 
@@ -441,43 +443,83 @@ dxd <- testForDEU(dxd, reducedModel=~sample + exon)
 dxd <- estimateExonFoldChanges( dxd, fitExpToVar="condition")
 
 dxr <- DEXSeqResults(dxd, independentFiltering=FALSE)
-
-
-```
-
-
-
-
-```{r}
-
-plotMA(dxr, cex=0.8, alpha=0.05) 
+colnames(dxr)[grep("log2fold", colnames(dxr))] <- "log2fold"
 
 ```
 
 
-```{r}
 
+```{r diffIsofromExprTable, echo=FALSE}
+MADTUdata <- data.frame(dxr)[order(dxr$padj),c("exonBaseMean", "log2fold", "pvalue", "padj")]
+MADTUdata$exonBaseMean <- log2(MADTUdata$exonBaseMean)
+colnames(MADTUdata)[which(colnames(MADTUdata)=="exonBaseMean")] <- "Log2MeanExon"
+colnames(MADTUdata)[which(colnames(MADTUdata)=="log2fold")] <- "Log2FC"
+
+knitr::kable(MADTUdata[1:15,], digits = c(2,2,45,45), booktabs=TRUE, table.envir='table*', linesep="")  %>%
+  kable_styling(latex_options=c("hold_position"), font_size=9)
+```
+
+*Table showing the top 15 gene isoforms, ranked by adjusted p-value, from the DEXSeq analysis. Information shown includes the log2 fold change between experimental conditions, the log-scaled transcript abundance and the false discovery corrected p-value (FDR). This table has not been filtered for genes that satisfy statistical or magnitudinal thresholds*
+
+
+
+```{r MAPlotIsoform, echo=FALSE}
+
+#plotMA(dxr, cex=0.8, alpha=0.05) 
+
+
+logUp <- which(MADTUdata$Log2FC >= config$lfcThreshold)
+logDown <- which(MADTUdata$Log2FC <= -config$lfcThreshold)
+withStat <- which(MADTUdata$padj <= config$adjPValueThreshold)
+colours <- c(noDifference="gray", upRegulated="red", downRegulated="green")
+gene <- rep("noDifference", nrow(MADTUdata))
+gene[logUp[logUp %in% withStat]] <- "upRegulated"
+gene[logDown[logDown %in% withStat]] <- "downRegulated"
+
+plot <- ggplot(MADTUdata, aes(y=Log2FC, x=Log2MeanExon)) + 
+    geom_point(size=1.2) + 
+    geom_hline(yintercept=-config$lfcThreshold, color="green") + 
+    geom_hline(yintercept=config$lfcThreshold, color="red") + 
+    aes(colour=gene) + 
+    scale_colour_manual(values=colours) +
+    ggtitle("MA plot showing logFC against log count for isoform level data")+ 
+    ylab("M (log2 transformed differential expression)")  + 
+    xlab("A (log2 transformed mean exon read counts)")
+
+print(plot)
+
+```
+
+<!--
+deprecated the display of the dispersal estimates - not for an introductory tutorial...
 plotDispEsts(dxd, cex=0.8)
-
-```
-
+-->
 
 
-```{r}
-
+```{r xlsAlternativelySplicedGenes, echo=FALSE}
 xlsAlternativelySplicedGenes <- file.path(resultDir, "AlternativelySplicedGenes.xlsx")
 alternativelySplicedGenes <- data.frame(gene_id=names(perGeneQValue(dxr)) , perGeneQValue(dxr), row.names=NULL)[order(perGeneQValue(dxr)), ]
 write.xlsx(alternativelySplicedGenes, file = xlsAlternativelySplicedGenes, sheetName = "AlternativelySplicedGenes", append = FALSE)
 
-
 xlsDiffExpressedIsoforms <- file.path(resultDir, "DiffExpressedIsoforms.xlsx")
 diffExpressedIsoforms <- dxr[order(dxr$padj), c("featureID", "groupID", "padj")]
 write.xlsx(diffExpressedIsoforms, file = xlsDiffExpressedIsoforms, sheetName = "diffExpressedIsoforms", append = FALSE)
-
 ```
 
+~~~
+`r xlsAlternativelySplicedGenes`
+~~~
 
-```{r}
+The Excel format spreadsheet file indicated above contains the output of the **`DEXSeq`** DTU analysis.
+
+
+# stageR analysis
+
+The final component of this cDNA sequence based gene isoform analysis is a stage-wise statistical analysis using the **`R`** software package called **`stageR`** (@R-stageR). **`stageR`** uses (1) the raw p-values for DTU from the **`DEXSeq`** analysis in the previous section and (2) a false-discovery corrected set of p-values from testing whether individual genes contain at least one exoning showing DTU. A hierarchical two-stage statistical testing evaluates the set of genes for DTU.    
+
+
+
+```{r stageRanalysis, echo=FALSE, warning=FALSE, message=FALSE}
 # stageR analysis of DEXSeq results:
 pConfirmation <- matrix(dxr$pvalue, ncol=1)
 dimnames(pConfirmation) <- list(dxr$featureID, "transcript")
@@ -492,51 +534,87 @@ colnames(dex.padj) <- c("gene_id", "transcript_id", "p_gene", "p_transcript")
 
 xlsStageRDiffTranscriptUsage <- file.path(resultDir, "StageRDiffTranscriptUsage.xlsx")
 write.xlsx(dex.padj, file = xlsStageRDiffTranscriptUsage, sheetName = "StageRDiffTranscriptUsage", append = FALSE)
+```
 
+~~~
+`r xlsStageRDiffTranscriptUsage`
+~~~
+
+The matrix of gene and transcript identifiers and the probability that they are showing any form of DTU has been written to an Excel format spreadsheet file at the path shown above.
+
+```{r stageRSummary, echo=FALSE}
+candidates <- union(which(dex.padj$p_gene < config$adjPValueThreshold), which(dex.padj$p_transcript < config$adjPValueThreshold))
+candidateList <- dex.padj[candidates,]
+candidateList <- candidateList[order(candidateList$p_transcript),]
+
+knitr::kable(candidateList, digits = c(2,2,5,5), booktabs=TRUE, table.envir='table*', linesep="")  %>%
+  kable_styling(latex_options=c("hold_position"), font_size=10)
+```
+
+*Table showing gene and transcript identifiers and their FDR corrected probabilities for the genes and their isoforms that have been identified as showing DTU using the R packages DEXSeq and StageR. These are all the genes and transcripts that pass threshold*
+
+
+The characteristics of the genes showing DTU can be summarised graphically. The following subsections show the top genes (ranked by FDR corrected p-values) that show differential expression and the expression patterns for their annotated transcripts. 
+
+
+```{r mungStageR, echo=FALSE, warning=FALSE, message=FALSE, results='asis'}
 # Join counts and stageR results:
 df <- trs_cts %>% left_join(dex.padj, by = c("gene_id", "transcript_id"))
 df <- df[order(df$p_gene),]
 
 # quickie to pull out the sample ids (could be derived from the earlier annotations?)
 scols <- setdiff(names(df),c("gene_id", "transcript_id", "p_gene", "p_transcript"))
-# Normalise counts:
-df[, scols] <- t(t(df[, scols]) / rowSums(df[, scols]))
+# Normalise counts???
+ndf <- df
+#ndf[, scols] <- t(t(ndf[, scols]) / rowSums(ndf[, scols]))
 # Melt data frame:
 tdf <- df %>% gather(key='sample', value='norm_count',-gene_id, -transcript_id, -p_gene, -p_transcript)
 # add some grouping metadata
 tdf$group <- coldata[match(tdf$sample, coldata$sample_id),]$condition
+# change column names for df to prettify reporting
+newnames <- rownames(studyDesign)[match(colnames(df)[which(colnames(df) %in% samples)], samples)]
+colnames(df)[which(colnames(df) %in% samples)] <- newnames
 
 # Filter for significant genes:
 
-genes <- as.character(tdf[which(tdf$p_gene < sig_level),]$gene_id)
-genes <- unique(genes)
 
-for(gene in genes){
-  gdf<-tdf[which(tdf$gene_id==gene),]
-  p_gene <- unique(gdf$p_gene)
-  p <- ggplot(gdf, aes(x=transcript_id, y=norm_count)) + geom_bar(stat="identity", aes(fill=sample), position="dodge")
-  p <- p + facet_wrap(~ group) + coord_flip()
-  p <- p + ggtitle(paste(gene," : p_value=",p_gene,sep=""))
-  print(p)
+
+plotDTU <- function(geneId) {
+  gdf<-tdf[which(tdf$gene_id==geneId),]
+  boxplot <- ggplot(gdf, aes(x=transcript_id, y=norm_count)) + geom_boxplot(aes(fill=group), position="dodge") + geom_dotplot(binaxis="y", stackdir="center", dotsize=0.6, aes(fill=group), position="dodge")+ theme(axis.text.x = element_text(angle = 90, hjust = 1)) +  ylab("Normalised transcript read count") + labs(title=paste("Boxplots showing normalised transcript expression\nlevel across conditions for gene",geneId)) + scale_fill_brewer(palette="Paired")
+  print(boxplot)
 }
+
+#selectedGenes <- unique(as.character(tdf[which(tdf$p_gene < config$adjPValueThreshold),]$gene_id))
+selectedGenes <- c("ENSG00000142937", "ENSG00000159377")
+
+for(gene in selectedGenes){
+  cat(paste("\n\n## Gene",gene,"\n\n"))
+  #print(df[which(df$gene_id == gene),])
+  myTable <- knitr::kable(df[which(df$gene_id == gene),], booktabs=TRUE, table.envir='table*', linesep="") %>% kable_styling(latex_options=c("hold_position", font_size=10))
+  print(myTable)
+  
+  cat(paste("\n\n", "*The table above shows annotated gene (", gene," p=",unique(df[which(df$gene_id == gene),"p_gene"]),") and its isoform transcripts. The number of reads mapped to each transcript is shown along with the FDR corrected p-values for DGE and DTU. The read counts are the raw counts. The figure below presents these data in a boxplot format - the read counts are grouped by experiemental condition*", sep=""))
+
+  cat("\n\n")
+  plotDTU(gene) 
+}
+
+#for(gene in genes){
+#  gdf<-tdf[which(tdf$gene_id==gene),]
+#  p_gene <- unique(gdf$p_gene)
+#  p <- ggplot(gdf, aes(x=transcript_id, y=norm_count)) + geom_bar(stat="identity", aes(fill=sample), position="dodge")
+#  p <- p + facet_wrap(~ group) + coord_flip()
+#  p <- p + ggtitle(paste(gene," : p_value=",p_gene,sep=""))
+#  print(p)
+#}
 ```
 
 
-# Glossary of Terms
-
-* __knit__ is the command to render an Rmarkdown file. The knitr package is used to embed code, the results of R analyses and their figures within the typeset text from the document. 
-
-* __L50__  describes the number of sequences (or contigs) that are longer than, or equal to, the N50 length and therefore include half the bases of the assembly
-
-* __N50__  describes the length (read length, contig length etc) where half the bases of the sequence collection are contained within reads/contigs of this length or longer
-
-* __Rmarkdown__ is an extension to markdown. Functional R code can be embedded in a plain-text document and subsequently rendered to other formats including the PDF format of this report.
-
-* __QV__  the quality value, -log10(p) that any given base is incorrect. QV may be either at the individual base level, or may be averaged across whole sequences
 
 
 
-# Reproducible Research - Produce your own report
+# Reproducible research - produce your own report
 
 This report has been created using **`Rmarkdown`**, publicly available **`R`** packages, and the \LaTeX document typesetting software for reproducibility. For clarity the **`R`** packages used, and their versions, is listed below.
 
@@ -545,6 +623,11 @@ This report has been created using **`Rmarkdown`**, publicly available **`R`** p
 ```{r sessionInfo, eval=TRUE, echo=FALSE, comment=NA}
 options(width = 100)
 utils:::print.sessionInfo(sessionInfo()[-7], locale=FALSE)
+```
+
+
+```{r, echo=FALSE, include=FALSE, warning="hide"}
+save.session(persistenceData)
 ```
 
 \fontsize{10}{14}

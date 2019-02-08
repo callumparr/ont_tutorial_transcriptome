@@ -75,7 +75,7 @@ There are five goals for this tutorial:
 * To utilise best data-management practices
 * To provide basic cDNA sequence QC metrics, enabling review and consideration of the starting experimental data
 * To map sequence reads to the reference *transcriptome* and to identify the gene isoforms that are expressed and the number of sequence reads that are observed from each gene isoform (and parental gene).
-* To perform a statistical analysis using **`__WHICH_METHOD__`** (REFERENCE) to identify differentially expressed genes and **`__WHICH_METHOD__`** (REFERENCE) to identify differentially used transcripts.
+* To perform a statistical analysis using **`edgeR`** (@R-edgeR2012) to identify differentially expressed genes and **`DEXSeq`** (@R-DEXSeq) and **`stageR`** (@R-stageR) to identify differentially used transcripts.
 
 
 # Getting started and best practices
