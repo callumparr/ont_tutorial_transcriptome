@@ -66,7 +66,7 @@ rule all:
 rule DownloadRemoteFile:
   input: lambda wildcards: HTTP.remote(downloadSource[wildcards.downloadFile])
   output:
-    ancient("ReferenceData/{downloadFile}")
+    "ReferenceData/{downloadFile}"
   shell:
     'mv {input} {output}'
 
@@ -74,7 +74,7 @@ rule DownloadRemoteFile:
 rule UnpackPackedFile:
   input: lambda wildcards: ("ReferenceData/"+unzipDict[wildcards.unzipFile])
   output:
-    ancient("Analysis/ReferenceData/{unzipFile}")
+    "Analysis/ReferenceData/{unzipFile}"
   shell:
     #"gunzip --keep -d {input}" --keep is obvious by missing from e.g. Centos 7
     "gunzip -c {input} > {output}"
@@ -125,7 +125,7 @@ rule count_reads:
         bam = "Analysis/Minimap2/{seqid}.sorted.bam",
         trs = ancient("Analysis/ReferenceData/"+UnpackedTranscriptomeFasta),
     output:
-        tsv = "Analysis/Salmon/{seqid}",
+        tsv = directory("Analysis/Salmon/{seqid}"),
     params:
         libtype = config["salmon_libtype"],
     threads: config["threads"]

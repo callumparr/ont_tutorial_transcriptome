@@ -45,8 +45,6 @@ restore.session("Analysis/Results/NanoporeTranscriptome.Rdata")
 
 # Glossary of terms
 
-* __conda__
-
 * __DGE__ is an abbreviation for *Differential Gene Expression* 
 
 * __DTU__ is an abbreviation for *Differential Transcript Usage*
@@ -60,9 +58,6 @@ restore.session("Analysis/Results/NanoporeTranscriptome.Rdata")
 * __QV__  the quality value, -log10(p) that any given base is incorrect. QV may be either at the individual base level, or may be averaged across whole sequences
 
 * __Rmarkdown__ is an extension to markdown. Functional R code can be embedded in a plain-text document and subsequently rendered to other formats including the PDF format of this report.
-
-* __snakemake__
-
 
 
 

@@ -1,22 +1,25 @@
 ---
 title: "cDNA transcriptome tutorial - from cDNA sequence to differential isoform analysis"
-date: "Report created: `r Sys.Date()`"
+bibliography: Static/Bibliography.bib
+date: 'Report created: `r Sys.Date()`'
 output:
+  word_document:
+    toc: yes
+    toc_depth: '2'
   html_document:
+    css: Static/ont_tutorial.css
+    df_print: paged
+    highlight: null
     keep_md: yes
     number_sections: yes
     self_contained: yes
     theme: default
-    highlight: null
-    css: Static/ont_tutorial.css
     toc: yes
     toc_depth: 2
     toc_float:
       collapsed: yes
       smooth_scroll: yes
-    df_print: paged
 link-citations: yes
-bibliography: Static/Bibliography.bib
 always_allow_html: yes
 ---
 
@@ -120,7 +123,7 @@ knitr::kable(studyDesign, booktabs=TRUE, table.envir='table*', linesep="")  %>%
 
 # Review of raw cDNA sequences 
 
-It is worth considering some of the characteristics of each set of sequences included within the analysis workflow. The statistics shown in the table below have been produced using the R ShortRead package (@R-ShortRead). Loading the provided Fastq format sequence files into computer memory allows us to calculate sequence length distributions, a review of sequence qualities and some minimal statistics that enable the qualitative and quantitative review of these different datasets.
+It is worth considering some of the characteristics of each set of sequences included within the analysis workflow. The observations shown in the table below have been produced using the R ShortRead package (@R-ShortRead). Loading the provided *fastq* format sequence files into computer memory allows us to calculate sequence length distributions, a review of sequence qualities and some minimal statistics that enable the qualitative and quantitative review of these different datasets.
 
 ```{r seqLibraryReview, echo=FALSE}
 processQCFastq <- function(rowname) {
@@ -154,10 +157,10 @@ knitr::kable(qcData, booktabs=TRUE, table.envir='table*', linesep="")  %>%
 *Table presenting summary statistics for the cDNA libraries imported*
 
 
-The summary statistics displayed include observational metrics such as the number of sequence reads, information on the longest, shortest and mean read lengths, GC content, N50 and N90 read lengths. Ideally sequences from each library will have similar characteristics. Large differences in e.g. the number of reads, overall read quality and GC content may indicate technical differences between the samples - such differences may confound the statistical analysis and hinder the identification of differentially expressed genes.
+The summary statistics displayed include observational metrics such as the number of sequence reads, information on the longest, shortest and mean read lengths, GC content, N50 and N90 read lengths. Ideally sequences from each library will have similar characteristics. Large differences in e.g. the number of reads, overall read quality and GC content may indicate technical differences between the samples - such differences may confound the statistical analysis and hinder the identification of differentially expressed genes and transcripts.
 
 
-# Review of cDNA read mapping.
+# Review of cDNA read mapping
 
 The workflow includes a **`samtools flagstat`** mapping statistic summary, written to files in the `Analysis/samtools` folder. These mapping statistics are useful for evaluating the concordance of different sequence libraries and thus the overall quality of the study - ideally there should be robust similarities in the fraction of mapping sequence reads / multi-mapping reads etc.
 
@@ -203,7 +206,7 @@ knitr::kable(flagstatRes, booktabs=TRUE, table.envir='table*', linesep="")  %>%
 
 *Table showing summary statistics from the minimap2 long read mapping of reads to the reference transcriptome*
 
-The read mapping statistics shown in the table above are derived from the **`bam`** files produced by **`minimap2`** when reads are mapped to the reference transcriptome (index). **`read mappings`** corresponds to the number of unique read mappings within the BAM file (one read may map to more than one location). **`Secondary`** corresponds to a secondary alignment for a read that can be mapped to multiple locations. A **`Supplementary`** alignment could correspond to an alignment that is chimeric or represents a structural variant or complex fusion event. A **`Duplicate`** read is unlikely but would represent multiple *identical* reads at the same locus that are likely the result of an amplification during the library preparation. **`%Mapping`** corresponds to the percentage fraction of sequence reads that are mapped to the reference genome - this is calculated as the number of primary mappings against the total number of sequence reads observed in the starting fastq files.
+The read mapping statistics shown in the table above are derived from the **`bam`** files produced by **`minimap2`**. **`read mappings`** corresponds to the number of unique read mappings described in the BAM file (one read may map to more than one location). **`Secondary`** corresponds to the number of secondary alignment for a read that can be mapped to multiple locations. A **`Supplementary`** alignment could correspond to an alignment that is chimeric or represents a structural variant or complex fusion event. A **`Duplicate`** read is unlikely but would represent multiple *identical* reads at the same locus that are likely the result of an amplification during the library preparation. **`%Mapping`** corresponds to the percentage fraction of sequence reads that are mapped to the reference genome - this is calculated as the number of primary mappings against the total number of sequence reads observed in the starting fastq files.
 
 
 
@@ -299,7 +302,7 @@ An Excel format spreadsheet containing the transcript mapping counts and parenta
 `r xlsExpressedGenesTranscripts`
 ~~~
 
-This step is informative important for the statistical analyses but also reveals the number of transcripts that can be observed for each gene. While a majority of genes contain a single expressed isoform (**`r round(as.numeric((table(table(salmonCounts$gene_id)) / length(table(salmonCounts$gene_id)) * 100)[1]), digits=1)` %** of genes contain a single isoform). The largest number of transcripts associated with a single gene is **`r max(table(salmonCounts$gene_id))` ** transcripts.
+This step is important for the statistical analyses and also reveals the number of transcripts that can be observed for each gene. While a majority of genes contain a single expressed isoform (**`r round(as.numeric((table(table(salmonCounts$gene_id)) / length(table(salmonCounts$gene_id)) * 100)[1]), digits=1)` %** of genes contain a single isoform). The largest number of transcripts associated with a single gene is **`r max(table(salmonCounts$gene_id))` ** transcripts.
 
 ```{r geneTranscriptCount, echo=FALSE}
 plotData(dmDSdata(counts=salmonCounts, samples=coldata))
@@ -310,7 +313,7 @@ plotData(dmDSdata(counts=salmonCounts, samples=coldata))
 # Read filtering
 
 
-**`DRIMSeq`** (@R-DRIMSeq) is used to filter the transcribed gene isoforms. The transcripts are filtered to select for the subset that are present in sufficient samples and are further filtered to remove both genes and transcripts with low levels of expression. The parameters used for filtering are defined in the **`config.yaml`** file. The parameters defined for this analysis include
+**`DRIMSeq`** (@R-DRIMSeq) is used to filter the transcript count data from the **`salmon`** analysis. The filter step will be used to select for genes and transcripts that satisfy rules for the number of samples in which a gene or transcript must be observed and minimum threshold levels for the number of observed reads. The parameters used for filtering are defined in the **`config.yaml`** file. The parameters defined for this analysis include
 
 * `min_samps_gene_expr` = **`r config$min_samps_gene_expr`** - a transcript must be mapped to a *gene* in at least this *minimum number of samples* for the *gene* be included in the analysis
 * `min_samps_feature_expr` = **`r config$min_samps_feature_expr`** - a transcript must be mapped to an *isoform* in at least this this *minimum number of samples* for the *gene isoform* to be included in the analysis
@@ -542,19 +545,24 @@ write.xlsx(dex.padj, file = xlsStageRDiffTranscriptUsage, sheetName = "StageRDif
 
 The matrix of gene and transcript identifiers and the probability that they are showing any form of DTU has been written to an Excel format spreadsheet file at the path shown above.
 
+
 ```{r stageRSummary, echo=FALSE}
 candidates <- union(which(dex.padj$p_gene < config$adjPValueThreshold), which(dex.padj$p_transcript < config$adjPValueThreshold))
 candidateList <- dex.padj[candidates,]
+
+# filter out transcripts that are not showing DTU - will lose a couple of genes in the process ...
+candidateList <- candidateList[which(candidateList$p_transcript <= config$adjPValueThreshold), ]
+
 candidateList <- candidateList[order(candidateList$p_transcript),]
 
 knitr::kable(candidateList, digits = c(2,2,5,5), booktabs=TRUE, table.envir='table*', linesep="")  %>%
   kable_styling(latex_options=c("hold_position"), font_size=10)
 ```
 
-*Table showing gene and transcript identifiers and their FDR corrected probabilities for the genes and their isoforms that have been identified as showing DTU using the R packages DEXSeq and StageR. These are all the genes and transcripts that pass threshold*
+*Table showing gene and transcript identifiers and their FDR corrected probabilities for the genes and their isoforms that have been identified as showing DTU using the R packages DEXSeq and StageR. This list has been shortened requiring that both gene and transcript must satisfy the p-value threshold*
 
 
-The characteristics of the genes showing DTU can be summarised graphically. The following subsections show the top genes (ranked by FDR corrected p-values) that show differential expression and the expression patterns for their annotated transcripts. 
+The characteristics of the genes showing DTU can be summarised graphically. The following subsections show example genes (selected arbitrarily) that show DGE and DTU and the expression patterns for their annotated transcripts. 
 
 
 ```{r mungStageR, echo=FALSE, warning=FALSE, message=FALSE, results='asis'}
@@ -585,29 +593,25 @@ plotDTU <- function(geneId) {
   print(boxplot)
 }
 
+tabulateDTU <- function(geneId) {
+  myTable <- knitr::kable(df[which(df$gene_id == geneId),], booktabs=TRUE, table.envir='table*', linesep="") %>% kable_styling(latex_options=c("hold_position", font_size=10))
+  print(myTable)
+}
+
+
 #selectedGenes <- unique(as.character(tdf[which(tdf$p_gene < config$adjPValueThreshold),]$gene_id))
 selectedGenes <- c("ENSG00000142937", "ENSG00000159377")
 
 for(gene in selectedGenes){
   cat(paste("\n\n## Gene",gene,"\n\n"))
-  #print(df[which(df$gene_id == gene),])
-  myTable <- knitr::kable(df[which(df$gene_id == gene),], booktabs=TRUE, table.envir='table*', linesep="") %>% kable_styling(latex_options=c("hold_position", font_size=10))
-  print(myTable)
+  tabulateDTU(gene)
   
-  cat(paste("\n\n", "*The table above shows annotated gene (", gene," p=",unique(df[which(df$gene_id == gene),"p_gene"]),") and its isoform transcripts. The number of reads mapped to each transcript is shown along with the FDR corrected p-values for DGE and DTU. The read counts are the raw counts. The figure below presents these data in a boxplot format - the read counts are grouped by experiemental condition*", sep=""))
+  cat(paste("\n\n", "*The table above shows annotated gene (", gene," p=",round(unique(df[which(df$gene_id == gene),"p_gene"]), digits=5),") and its isoform transcripts. The number of reads mapped to each transcript is shown along with the FDR corrected p-values for DGE and DTU. The read counts are the raw counts. The figure below presents these data in a boxplot format - the read counts are grouped by experimental condition*", sep=""))
 
   cat("\n\n")
   plotDTU(gene) 
 }
 
-#for(gene in genes){
-#  gdf<-tdf[which(tdf$gene_id==gene),]
-#  p_gene <- unique(gdf$p_gene)
-#  p <- ggplot(gdf, aes(x=transcript_id, y=norm_count)) + geom_bar(stat="identity", aes(fill=sample), position="dodge")
-#  p <- p + facet_wrap(~ group) + coord_flip()
-#  p <- p + ggtitle(paste(gene," : p_value=",p_gene,sep=""))
-#  print(p)
-#}
 ```
 
 
