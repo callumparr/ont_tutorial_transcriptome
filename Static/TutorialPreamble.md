@@ -101,7 +101,7 @@ The first step for performing a cDNA sequence analysis involves collation of inf
 
 The example data included with this tutorial describes a study comparing an experimental sample against a linked control. The experimental and control samples have been prepared in triplicate. This design is described in a configuration file named **`config.yaml`** - an example file has been provided with the tutorial. The content of this file is highlighted in the figure above. The cDNA sequence files are defined within the **`Sample`** block; experimental groups and their discrete biological samples are defined here.
 
-**`transcriptome`** refers to the reference *transcriptome* sequence against which the cDNA sequence reads will be mapped. **`annotation`** refers to the associated whole genome annotations for the corresponding genome sequence. This is required for linking transcripts to annotated transcripts and their parental genes. In this tutorial a URL is provided for both and the **`Snakemake`** workflow will download the corresponding files. 
+**`transcriptome`** refers to the reference *transcriptome* sequence against which the cDNA sequence reads will be mapped. **`annotation`** refers to the associated whole genome annotations for the corresponding genome sequence. This is required for linking transcripts to annotated transcripts and their parental genes. In this tutorial a URL is provided for both and the **`snakemake`** workflow will download the corresponding files. 
 
 The configuration file provides additional parameters that can be used to provide further instructions to the **`minimap2`** software and provide thresholds for the minimal numbers of cDNA sequence reads that should be mapped to define a gene or its transcripts as expressed. 
 
@@ -158,7 +158,7 @@ snakemake -j <NPROC>
 
 # Prepare the analysis report
 
-The **`Rmarkdown`** script can be run usimg the **`knit`** dialog in the **`Rstudio`** software - please see the figure below. Selecting **`Knit to HTML`** will prepare a portable HTML file. 
+The **`Rmarkdown`** script can be run usimg the **`knit`** dialog in the **`Rstudio`** software. The **`Rstudio`** software is installed during the **`conda`** environment build. Please see the figure below for a screenshot of the **`Rstudio`** interface showing the **`knit`** icon. Selecting **`Knit to HTML`** will prepare a portable HTML file. 
 
 ![](Static/Images/KnitIt.png) 
 
