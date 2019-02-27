@@ -69,7 +69,7 @@ Other dependencies include
 
 #### Compilation From Source
 
-This tutorial should not require the compilation of any software. The **`conda`* software management system should manage all required bioinformatics software dependencies.
+This tutorial should not require the compilation of any software. The **`conda`** software management system should manage all required bioinformatics software dependencies.
 
 
 
