@@ -242,7 +242,7 @@ rownames(rawSalmonCounts) <- gsub("\\..+", "", as.character(rawSalmonCounts$Refe
 
 
 
-```{r geneCounts, echo=FALSE}
+```{r geneCounts, echo=FALSE, warning=FALSE}
 # adjust column names for the presented table and excel file
 vRawSalmonCounts <- rawSalmonCounts[order(rowSums(rawSalmonCounts[, seq(2, ncol(rawSalmonCounts))]), decreasing=TRUE),]
 newnames <- rownames(studyDesign)[match(colnames(vRawSalmonCounts)[which(colnames(vRawSalmonCounts) %in% samples)], samples)]
@@ -251,17 +251,16 @@ colnames(vRawSalmonCounts)[which(colnames(vRawSalmonCounts) %in% samples)] <- ne
 knitr::kable(vRawSalmonCounts[1:10,], booktabs=TRUE, table.envir='table*', linesep="") %>%
   kable_styling(latex_options=c("hold_position", font_size=11))
 
-xlsExpressedTranscripts <- file.path(resultDir, "ExpressedTranscripts.xlsx")
-write.xlsx(vRawSalmonCounts, file = xlsExpressedTranscripts,
-      sheetName = "rawSalmonCounts", append = FALSE)
+csvExpressedTranscripts <- file.path(resultDir, "ExpressedTranscripts.csv")
+write.csv(vRawSalmonCounts, file = csvExpressedTranscripts)
 ```
 
 *Table showing the 10 annotated transcript features identified by Minimap2 mapping and Salmon transcript detection with the highest number of mapped reads*
 
-The complete transcript mapping data is provided as an Excel format spreadsheet file at
+The complete transcript mapping data is provided as a CSV format file at
 
 ~~~
-`r xlsExpressedTranscripts`
+`r csvExpressedTranscripts`
 ~~~
 
 
@@ -290,16 +289,15 @@ vSalmonCounts <- salmonCounts[order(rowSums(salmonCounts[, seq(4, ncol(salmonCou
 newnames <- rownames(studyDesign)[match(colnames(vSalmonCounts)[which(colnames(vSalmonCounts) %in% samples)], samples)]
 colnames(vSalmonCounts)[which(colnames(vSalmonCounts) %in% samples)] <- newnames
 
-xlsExpressedGenesTranscripts <- file.path(resultDir, "ExpressedGenesTranscripts.xlsx")
-write.xlsx(vSalmonCounts, file = xlsExpressedGenesTranscripts,
-      sheetName = "salmonCounts", append = FALSE)
+csvExpressedGenesTranscripts <- file.path(resultDir, "ExpressedGenesTranscripts.csv")
+write.csv(vSalmonCounts, file = csvExpressedGenesTranscripts)
 
 ```
 
-An Excel format spreadsheet containing the transcript mapping counts and parental gene assignments has been prepared and is available in the following folder. 
+An CSV format file containing the transcript mapping counts and parental gene assignments has been prepared and is available in the following folder. 
 
 ~~~
-`r xlsExpressedGenesTranscripts`
+`r csvExpressedGenesTranscripts`
 ~~~
 
 This step is important for the statistical analyses and also reveals the number of transcripts that can be observed for each gene. While a majority of genes contain a single expressed isoform (**`r round(as.numeric((table(table(salmonCounts$gene_id)) / length(table(salmonCounts$gene_id)) * 100)[1]), digits=1)` %** of genes contain a single isoform). The largest number of transcripts associated with a single gene is **`r max(table(salmonCounts$gene_id))` ** transcripts.
@@ -320,7 +318,7 @@ plotData(dmDSdata(counts=salmonCounts, samples=coldata))
 * `min_gene_expr` = **`r config$min_gene_expr`** - the *minimum number of total mapped sequence reads* for a gene to be considered *expressed*
 * `min_feature_expr` = **`r config$min_feature_expr`** - the *minimum number of total mapped sequence reads* for a *gene isoform* to be considered
 
-```{r, echo=FALSE}
+```{r, echo=FALSE, warning=FALSE}
 dmDSdataObj  <- dmDSdata(counts=salmonCounts, samples=coldata)
 trs_cts_unfiltered <- counts(dmDSdataObj)
 
@@ -335,7 +333,7 @@ dmDSdataObj <- dmFilter(dmDSdataObj, min_samps_gene_expr = config$min_samps_gene
 trs_cts <- counts(dmDSdataObj)
 names(trs_cts)[2]<-"transcript_id"  # changed from featureID
 
-gene_cts <- trs_cts_unfiltered %>% dplyr::select(c(1, 3:ncol(trs_cts)))  %>% group_by(gene_id) %>% summarise_all(funs(sum)) %>% data.frame()
+gene_cts <- trs_cts_unfiltered %>% dplyr::select(c(1, 3:ncol(trs_cts)))  %>% group_by(gene_id) %>% summarise_all(list(sum)) %>% data.frame()
 rownames(gene_cts) <- gene_cts$gene_id
 gene_cts$gene_id <- NULL
 
