@@ -5,8 +5,8 @@ channels:
   - r
 dependencies:
   - snakemake
-  - python =3.6
-  - r =3.5.1
+  - python
+  - r
   - rstudio
   - pandas
   - salmon
@@ -22,6 +22,5 @@ dependencies:
   - bioconductor-shortread
   - r-devtools
   - r-session
-  - r-xlsx
-  - openjdk
+  - r-writexl
   - r-kableextra

@@ -54,7 +54,6 @@ Editing of the workflow's configuration file, **`config.yaml`**, will allow the 
 5. Initialise the conda environment 
 ```
     source activate transcriptome_tutorial
-    R CMD javareconf > /dev/null 2>&1
 ```
 
 

@@ -63,7 +63,6 @@ Other dependencies include
 5. Initialise the conda environment 
 ```
     source activate transcriptome_tutorial
-    R CMD javareconf > /dev/null 2>&1
 ```
 
 

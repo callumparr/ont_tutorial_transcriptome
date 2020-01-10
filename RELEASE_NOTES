@@ -1,0 +1,7 @@
+2020-01-10
+- Bug fixes
+  - JNI errors associated with R CMD javareconf
+    - java is only used for writing Excel files with r-xlsx
+    - dropped dependency for java and have replaced r-xlsx with r-writexl
+    - have updated tutorial.RMD to use r-writexl instead = FIXED
+    - have removed reference to java from vignette = FIXED
