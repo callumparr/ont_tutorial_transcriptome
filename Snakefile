@@ -63,21 +63,21 @@ rule all:
       "Analysis/ReferenceData/"+UnpackedAnnotationGTF
       
       
-rule DownloadRemoteFile:
-  input: lambda wildcards: HTTP.remote(downloadSource[wildcards.downloadFile])
-  output:
-    "ReferenceData/{downloadFile}"
-  shell:
-    'mv {input} {output}'
+#rule DownloadRemoteFile:
+#  input: lambda wildcards: HTTP.remote(downloadSource[wildcards.downloadFile])
+#  output:
+#    "ReferenceData/{downloadFile}"
+#  shell:
+#    'mv {input} {output}'
 
 
-rule UnpackPackedFile:
-  input: lambda wildcards: ("ReferenceData/"+unzipDict[wildcards.unzipFile])
-  output:
-    "Analysis/ReferenceData/{unzipFile}"
-  shell:
-    #"gunzip --keep -d {input}" --keep is obvious by missing from e.g. Centos 7
-    "gunzip -c {input} > {output}"
+#rule UnpackPackedFile:
+#  input: lambda wildcards: ("ReferenceData/"+unzipDict[wildcards.unzipFile])
+#  output:
+#    "Analysis/ReferenceData/{unzipFile}"
+#  shell:
+#    #"gunzip --keep -d {input}" --keep is obvious by missing from e.g. Centos 7
+#    "gunzip -c {input} > {output}"
 
 
 rule build_minimap_index: ## build minimap2 index
