@@ -3,9 +3,6 @@ title: "cDNA transcriptome tutorial - from cDNA sequence to differential isoform
 bibliography: Static/Bibliography.bib
 date: 'Report created: `r Sys.Date()`'
 output:
-  word_document:
-    toc: yes
-    toc_depth: '2'
   html_document:
     css: Static/ont_tutorial.css
     df_print: paged
@@ -19,6 +16,9 @@ output:
     toc_float:
       collapsed: yes
       smooth_scroll: yes
+  word_document:
+    toc: yes
+    toc_depth: '2'
 link-citations: yes
 always_allow_html: yes
 ---
@@ -165,7 +165,7 @@ The summary statistics displayed include observational metrics such as the numbe
 The workflow includes a **`samtools flagstat`** mapping statistic summary, written to files in the `Analysis/samtools` folder. These mapping statistics are useful for evaluating the concordance of different sequence libraries and thus the overall quality of the study - ideally there should be robust similarities in the fraction of mapping sequence reads / multi-mapping reads etc.
 
 
-```{r flagstatStats, echo=FALSE, cache=FALSE}
+```{r flagstatStats, eval=FALSE, cache=FALSE, include=FALSE}
 flagstatTargets <- file.path("Analysis", "samtools", 
     paste(tools::file_path_sans_ext(basename(as.character(studyDesign$filename)), compression=TRUE),".flagstat",sep="")
 )
@@ -598,7 +598,7 @@ tabulateDTU <- function(geneId) {
 
 
 #selectedGenes <- unique(as.character(tdf[which(tdf$p_gene < config$adjPValueThreshold),]$gene_id))
-selectedGenes <- c("ENSG00000142937", "ENSG00000159377")
+selectedGenes <- c("ENSMUSG00000073418", "ENSMUSG00000095041")
 
 for(gene in selectedGenes){
   cat(paste("\n\n## Gene",gene,"\n\n"))
