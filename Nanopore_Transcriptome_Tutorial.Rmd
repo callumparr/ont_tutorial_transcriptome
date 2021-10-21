@@ -271,7 +271,7 @@ The **`Salmon`** method, as shown in the table above, has assigned expressed cDN
 
 ```{r loadAnnotations, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
 # load the database annotation from provided GFF file
-txdb <- makeTxDbFromGFF(file.path("ReferenceData", basename(config$annotation)))  # read Annotation field from config.yaml
+txdb <- makeTxDbFromGFF(file.path("Analysis", "ReferenceData", basename(config$annotation)))  # read Annotation field from config.yaml
 txdf <- AnnotationDbi::select(txdb, keys(txdb,"GENEID"), "TXNAME", "GENEID")
 tab <- table(txdf$GENEID)
 txdf$ntx<- tab[match(txdf$GENEID, names(tab))]
